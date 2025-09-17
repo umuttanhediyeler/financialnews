@@ -283,37 +283,30 @@
       };
       
       // --- App.tsx ---
-      let ai;
-      let initializationError = null;
-
-      try {
-        const apiKey = process.env.API_KEY;
-        if (!apiKey) {
-          throw new Error("API Anahtarı ortam değişkenlerinde yapılandırılmamış.");
-        }
-        ai = new GoogleGenAI({ apiKey: apiKey });
-      } catch (e) {
-        console.error("GoogleGenAI başlatılırken hata oluştu:", e);
-        // This catch block handles both the error from the 'new Error' above
-        // and potential ReferenceError if 'process' is not defined in the browser.
-        initializationError = "API Anahtarı yapılandırması bulunamadı. Lütfen dağıtım ortamınızı kontrol edin.";
-      }
+      // =================================================================================
+      // ÖNEMLİ KURULUM TALİMATI / IMPORTANT SETUP INSTRUCTION
+      // =================================================================================
+      // LÜTFEN AŞAĞIDAKİ "YOUR_API_KEY_HERE" YAZAN YERİ KENDİ GOOGLE GEMINI API ANAHTARINIZ İLE DEĞİŞTİRİN.
+      // UYGULAMA BU ANAHTAR OLMADAN ÇALIŞMAZ.
+      //
+      // PLEASE REPLACE "YOUR_API_KEY_HERE" BELOW WITH YOUR OWN GOOGLE GEMINI API KEY.
+      // THE APPLICATION WILL NOT WORK WITHOUT IT.
+      //
+      // Security Warning: This key will be visible to anyone visiting your site.
+      // Use this method for personal/demo projects only and monitor your key usage.
+      // =================================================================================
+      const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY_HERE" });
 
       const App = () => {
         const [articles, setArticles] = useState([]);
         const [isLoading, setIsLoading] = useState(true);
-        const [error, setError] = useState(initializationError);
+        const [error, setError] = useState(null);
 
         const [selectedArticle, setSelectedArticle] = useState(null);
         const [isDetailLoading, setIsDetailLoading] = useState(false);
         const [detailError, setDetailError] = useState(null);
 
         useEffect(() => {
-          if (error) { // If there was an initialization error, stop loading and show the error.
-            setIsLoading(false);
-            return;
-          };
-
           const getNews = async () => {
             try {
               setIsLoading(true);
