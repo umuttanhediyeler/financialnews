@@ -275,7 +275,12 @@
       };
       
       // --- App.tsx ---
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      // IMPORTANT: Add your Google AI API key here.
+      // To get an API key, visit https://makersuite.google.com/
+      const API_KEY = "AIzaSyB460wHiXfCTjMRjmz7dw73hgSCJEekMGo"; 
+      
+      const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       const App = () => {
         const [articles, setArticles] = useState([]);
@@ -288,6 +293,11 @@
 
         useEffect(() => {
           const getNews = async () => {
+            if (API_KEY === "YOUR_API_KEY_HERE") {
+              setError("Lütfen API anahtarınızı kodda belirtin.");
+              setIsLoading(false);
+              return;
+            }
             try {
               setIsLoading(true);
               setError(null);
