@@ -40,7 +40,7 @@
       // CDN Imports
       import React, { useState, useEffect } from 'react';
       import ReactDOM from 'react-dom/client';
-      import { GoogleGenAI } from "@google/genai";
+      import { GoogleGenAI, Type } from "@google/genai";
 
       // --- services/geminiService.ts ---
       const fetchTurkishFinancialNews = async (ai) => {
@@ -48,23 +48,28 @@
           throw new Error("GenAI istemcisi başlatılamadı.");
         }
         try {
-          const prompt = `
-            Act as a financial news expert. Fetch 8 of the most recent and significant financial news articles from Turkey.
-            Topics should include the stock market, foreign exchange, and commodities.
-            The "title" and "summary" MUST be in Turkish.
-            Your response MUST be ONLY a raw JSON array, starting with '[' and ending with ']'. Do not add any other text or markdown formatting.
-            Each JSON object in the array must contain:
-            - "title": The article headline, in Turkish.
-            - "summary": A concise, one-sentence summary, in Turkish.
-            - "url": The direct URL to the source article.
-          `;
-
+          const prompt = `Türkiye'den borsa, döviz ve emtiaları kapsayan en son ve en önemli 8 finans haberini al. Başlık ve özet Türkçe olmalı.`;
+          
           const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
               tools: [{googleSearch: {}}],
               temperature: 0.5,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING, description: "Makale başlığı, Türkçe." },
+                    summary: { type: Type.STRING, description: "Tek cümlelik kısa özet, Türkçe." },
+                    url: { type: Type.STRING, description: "Kaynak makalenin direkt URL'si." }
+                  },
+                  required: ["title", "summary", "url"]
+                }
+              },
+              thinkingConfig: { thinkingBudget: 0 }
             },
           });
           
@@ -74,25 +79,14 @@
             console.error("The AI model returned an empty response.");
             throw new Error("Yapay zeka modeli boş bir yanıt döndürdü. Lütfen daha sonra tekrar deneyin.");
           }
-
-          const startIndex = responseText.indexOf('[');
-          const endIndex = responseText.lastIndexOf(']');
-
-          if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-            console.error("Could not find a valid JSON array in the model response.", { responseText });
-            throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
-          }
-          
-          const jsonString = responseText.substring(startIndex, endIndex + 1);
           
           let articles;
           try {
-              articles = JSON.parse(jsonString);
+              articles = JSON.parse(responseText);
           } catch (parseError) {
-              console.error("JSON parsing error:", parseError, { jsonString });
+              console.error("JSON parsing error:", parseError, { responseText });
               throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
           }
-
 
           if (!Array.isArray(articles)) {
             console.error("Parsed data is not an array:", { articles });
@@ -117,7 +111,7 @@
         }
       };
 
-      const fetchArticleContent = async (ai, url) => {
+      const streamArticleContent = async (ai, url) => {
         if (!ai) {
           throw new Error("GenAI istemcisi başlatılamadı.");
         }
@@ -130,7 +124,7 @@
             Your response should contain ONLY the Turkish summary text, with no extra titles or introductions.
           `;
           
-          const response = await ai.models.generateContent({
+          return ai.models.generateContentStream({
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
@@ -138,19 +132,6 @@
               temperature: 0.2,
             },
           });
-
-          const content = response.text;
-          const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-          
-          const sources = groundingChunks
-              .map(chunk => chunk.web)
-              .filter((web) => !!web?.uri);
-
-          if (!content || content.trim().length < 20) {
-              throw new Error("Model, makale için yeterli içerik döndürmedi.");
-          }
-          
-          return { content, sources };
         } catch(error) {
           console.error(`Error fetching content for URL ${url}:`, error);
           throw new Error("Makalenin tam içeriği alınamadı.");
@@ -241,10 +222,21 @@
               onClick={(e) => e.stopPropagation()}
             >
               <header className="p-4 flex items-center justify-between border-b border-lightest-slate/20 flex-shrink-0">
-                <h2 id="article-title" className="text-xl font-bold text-lightest-slate pr-4">{article.title}</h2>
+                <div className="flex items-center overflow-hidden">
+                  <button
+                    onClick={handleClose}
+                    className="p-2 -ml-2 sm:ml-0 mr-2 rounded-full text-slate hover:bg-medium-blue hover:text-brand-orange transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange flex-shrink-0"
+                    aria-label="Geri dön"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <h2 id="article-title" className="text-xl font-bold text-lightest-slate truncate" title={article.title}>{article.title}</h2>
+                </div>
                 <button
                   onClick={handleClose}
-                  className="p-2 rounded-full text-slate hover:bg-medium-blue hover:text-brand-orange transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange"
+                  className="p-2 ml-4 rounded-full text-slate hover:bg-medium-blue hover:text-brand-orange transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange flex-shrink-0"
                   aria-label="Makaleyi kapat"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -283,19 +275,7 @@
       };
       
       // --- App.tsx ---
-      // =================================================================================
-      // ÖNEMLİ KURULUM TALİMATI / IMPORTANT SETUP INSTRUCTION
-      // =================================================================================
-      // LÜTFEN AŞAĞIDAKİ "YOUR_API_KEY_HERE" YAZAN YERİ KENDİ GOOGLE GEMINI API ANAHTARINIZ İLE DEĞİŞTİRİN.
-      // UYGULAMA BU ANAHTAR OLMADAN ÇALIŞMAZ.
-      //
-      // PLEASE REPLACE "YOUR_API_KEY_HERE" BELOW WITH YOUR OWN GOOGLE GEMINI API KEY.
-      // THE APPLICATION WILL NOT WORK WITHOUT IT.
-      //
-      // Security Warning: This key will be visible to anyone visiting your site.
-      // Use this method for personal/demo projects only and monitor your key usage.
-      // =================================================================================
-      const ai = new GoogleGenAI({ apiKey: "AIzaSyB460wHiXfCTjMRjmz7dw73hgSCJEekMGo" });
+      const ai = new GoogleGenAI({ apiKey: AIzaSyB460wHiXfCTjMRjmz7dw73hgSCJEekMGo });
 
       const App = () => {
         const [articles, setArticles] = useState([]);
@@ -340,25 +320,50 @@
 
 
         const handleSelectArticle = async (article) => {
-          setSelectedArticle(article);
-          if (article.content || !ai) return;
+          if (article.content) {
+            setSelectedArticle(article);
+            return;
+          }
 
+          setSelectedArticle({ ...article, content: '', sources: [] });
           setIsDetailLoading(true);
           setDetailError(null);
+
           try {
-            const { content, sources } = await fetchArticleContent(ai, article.url);
-            const updatedArticle = { ...article, content, sources };
-            setSelectedArticle(updatedArticle);
-            setArticles(prevArticles => 
+            const stream = await streamArticleContent(ai, article.url);
+            setIsDetailLoading(false); 
+            
+            let fullContent = '';
+            const sources = new Map();
+
+            for await (const chunk of stream) {
+              const chunkText = chunk.text;
+              if (chunkText) {
+                fullContent += chunkText;
+                setSelectedArticle(prev => prev ? ({ ...prev, content: fullContent }) : null);
+              }
+
+              const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+              groundingChunks.forEach(c => {
+                  if (c.web?.uri && !sources.has(c.web.uri)) {
+                      sources.set(c.web.uri, { uri: c.web.uri, title: c.web.title || '' });
+                  }
+              });
+              
+              if(sources.size > 0) {
+                 setSelectedArticle(prev => prev ? ({ ...prev, sources: Array.from(sources.values()) }) : null);
+              }
+            }
+
+            const finalSources = Array.from(sources.values());
+            const updatedArticle = { ...article, content: fullContent, sources: finalSources };
+            setArticles(prevArticles =>
               prevArticles.map(a => a.url === article.url ? updatedArticle : a)
             );
+
           } catch (err) {
-            if (err instanceof Error) {
-              setDetailError(err.message);
-            } else {
-              setDetailError('Makale alınırken bilinmeyen bir hata oluştu.');
-            }
-          } finally {
+            const errorMessage = (err instanceof Error) ? err.message : 'Makale alınırken bilinmeyen bir hata oluştu.';
+            setDetailError(errorMessage);
             setIsDetailLoading(false);
           }
         };
@@ -380,7 +385,7 @@
           return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 lg:gap-8">
               {articles.map((article, index) => (
-                <NewsCard key={index} article={article} onSelect={handleSelectArticle} />
+                <NewsCard key={article.url || index} article={article} onSelect={handleSelectArticle} />
               ))}
             </div>
           );
@@ -393,7 +398,7 @@
             </main>
             <footer className="text-center py-4 mt-8">
               <p className="text-slate text-sm">
-                Bloomberg'den veriler ve haberler.
+                Finansal veriler AI ile işlenmiştir.
               </p>
             </footer>
             
