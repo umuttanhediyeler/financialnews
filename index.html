@@ -46,20 +46,63 @@
       const getDisplayError = (error) => {
           console.error("Full API Error:", error);
           if (error instanceof Error) {
-            const message = error.message.toLowerCase();
-            if (message.includes('api key not valid')) {
+            let message = error.message;
+            
+            // Attempt to parse JSON from the error message, as the API might return it
+            try {
+              const errorJson = JSON.parse(message);
+              if (errorJson.error && errorJson.error.message) {
+                message = errorJson.error.message;
+              }
+            } catch (e) {
+              // Not a JSON error, proceed with string matching on the original message
+            }
+
+            const lowerCaseMessage = message.toLowerCase();
+
+            if (lowerCaseMessage.includes('api key not valid')) {
                 return "Geçersiz API Anahtarı. Lütfen anahtarınızı kontrol edip tekrar deneyin.";
             }
-            if (message.includes('http referrer')) {
+            if (lowerCaseMessage.includes('http referrer')) {
                 return "API Anahtarı bu web sitesi için yetkilendirilmemiş. Lütfen Google Cloud Console'da web sitenizin adresini (URL) yetkili alanlara eklediğinizden emin olun.";
             }
-            if (message.includes('quota')) {
+            if (lowerCaseMessage.includes('quota')) {
                 return "API kullanım kotası aşıldı. Lütfen daha sonra tekrar deneyin veya Google Cloud kotanızı kontrol edin.";
             }
-            return error.message; // Return the specific error message from the try/catch
+            if (lowerCaseMessage.includes('overloaded') || lowerCaseMessage.includes('503')) {
+                return "Yapay zeka modeli şu anda aşırı yoğun. Lütfen birkaç dakika sonra tekrar deneyin.";
+            }
+            return message; // Return the specific error message
           }
           return "Bilinmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.";
       }
+
+      const generateContentWithRetry = async (ai, params, maxRetries = 3, initialDelay = 2000) => {
+        let attempts = 0;
+        let delay = initialDelay;
+        while (attempts < maxRetries) {
+          try {
+            const response = await ai.models.generateContent(params);
+            if (!response.text || response.text.trim() === '') {
+              // This is a valid response, but empty. We don't want to retry this.
+              throw new Error("Model returned an empty response.");
+            }
+            return response;
+          } catch (error) {
+            attempts++;
+            const isRetryable = error instanceof Error && (error.message.includes('503') || error.message.toLowerCase().includes('overloaded'));
+
+            if (isRetryable && attempts < maxRetries) {
+              console.warn(`Attempt ${attempts} failed due to overloaded model. Retrying in ${delay / 1000}s...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              delay *= 2; // Exponential backoff
+            } else {
+              throw error; // Re-throw the last error if not retryable or max retries reached
+            }
+          }
+        }
+        throw new Error("Yapay zeka modeli birden fazla denemeden sonra yanıt vermedi.");
+      };
 
       const fetchTurkishFinancialNews = async (ai) => {
         if (!ai) {
@@ -77,7 +120,7 @@
             - "url": The direct URL to the source article.
           `;
 
-          const response = await ai.models.generateContent({
+          const response = await generateContentWithRetry(ai, {
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
@@ -87,11 +130,6 @@
           });
           
           let responseText = response.text?.trim();
-
-          if (!responseText) {
-            console.error("The AI model returned an empty response.");
-            throw new Error("Yapay zeka modeli boş bir yanıt döndürdü. Lütfen daha sonra tekrar deneyin.");
-          }
 
           // Clean up potential markdown formatting
           if (responseText.startsWith('```json')) {
@@ -143,7 +181,7 @@
             Your response should contain ONLY the Turkish summary text, with no extra titles or introductions.
           `;
           
-          const response = await ai.models.generateContent({
+          const response = await generateContentWithRetry(ai, {
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
