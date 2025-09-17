@@ -234,15 +234,6 @@
                   </button>
                   <h2 id="article-title" className="text-xl font-bold text-lightest-slate truncate" title={article.title}>{article.title}</h2>
                 </div>
-                <button
-                  onClick={handleClose}
-                  className="p-2 ml-4 rounded-full text-slate hover:bg-medium-blue hover:text-brand-orange transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange flex-shrink-0"
-                  aria-label="Makaleyi kapat"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
               </header>
               <div className="overflow-y-auto p-6 flex-grow">
                 {isLoading && <LoadingSpinner />}
@@ -268,6 +259,15 @@
                     </ul>
                   </div>
                 )}
+                <div className="mt-8 pt-6 border-t border-lightest-slate/20">
+                    <button
+                        onClick={handleClose}
+                        className="w-full bg-brand-orange text-white font-bold py-3 px-4 rounded-lg hover:bg-opacity-90 transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                        aria-label="Detay görünümünü kapat"
+                    >
+                        Kapat
+                    </button>
+                </div>
               </div>
             </div>
           </div>
