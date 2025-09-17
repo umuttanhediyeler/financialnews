@@ -43,6 +43,24 @@
       import { GoogleGenAI } from "@google/genai";
 
       // --- services/geminiService.ts ---
+      const getDisplayError = (error) => {
+          console.error("Full API Error:", error);
+          if (error instanceof Error) {
+            const message = error.message.toLowerCase();
+            if (message.includes('api key not valid')) {
+                return "Geçersiz API Anahtarı. Lütfen anahtarınızı kontrol edip tekrar deneyin.";
+            }
+            if (message.includes('http referrer')) {
+                return "API Anahtarı bu web sitesi için yetkilendirilmemiş. Lütfen Google Cloud Console'da web sitenizin adresini (URL) yetkili alanlara eklediğinizden emin olun.";
+            }
+            if (message.includes('quota')) {
+                return "API kullanım kotası aşıldı. Lütfen daha sonra tekrar deneyin veya Google Cloud kotanızı kontrol edin.";
+            }
+            return error.message; // Return the specific error message from the try/catch
+          }
+          return "Bilinmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.";
+      }
+
       const fetchTurkishFinancialNews = async (ai) => {
         if (!ai) {
           throw new Error("GenAI istemcisi başlatılamadı.");
@@ -68,11 +86,18 @@
             },
           });
           
-          const responseText = response.text?.trim();
+          let responseText = response.text?.trim();
 
           if (!responseText) {
             console.error("The AI model returned an empty response.");
             throw new Error("Yapay zeka modeli boş bir yanıt döndürdü. Lütfen daha sonra tekrar deneyin.");
+          }
+
+          // Clean up potential markdown formatting
+          if (responseText.startsWith('```json')) {
+            responseText = responseText.substring(7, responseText.length - 3).trim();
+          } else if (responseText.startsWith('```')) {
+             responseText = responseText.substring(3, responseText.length - 3).trim();
           }
 
           const startIndex = responseText.indexOf('[');
@@ -93,7 +118,6 @@
               throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
           }
 
-
           if (!Array.isArray(articles)) {
             console.error("Parsed data is not an array:", { articles });
             throw new Error("API geçerli bir makale dizisi döndürmedi.");
@@ -102,18 +126,7 @@
           return articles;
 
         } catch (error) {
-          console.error("Error fetching Turkish financial news:", error);
-           if (error.message.includes("API key not valid")) {
-              throw new Error("Geçersiz API Anahtarı. Lütfen anahtarınızı kontrol edip tekrar deneyin.");
-           }
-          if (error instanceof Error && (
-              error.message.startsWith("Haber verileri") || 
-              error.message.startsWith("API geçerli") ||
-              error.message.startsWith("Yapay zeka modeli")
-          )) {
-              throw error;
-          }
-          throw new Error("Yapay zeka modelinden haberler alınamadı. Lütfen API anahtarınızı ve bağlantınızı kontrol edin.");
+          throw new Error(getDisplayError(error));
         }
       };
 
@@ -152,8 +165,7 @@
           
           return { content, sources };
         } catch(error) {
-          console.error(`Error fetching content for URL ${url}:`, error);
-          throw new Error("Makalenin tam içeriği alınamadı.");
+          throw new Error(getDisplayError(error));
         }
       }
 
@@ -384,7 +396,7 @@
             </main>
             <footer className="text-center py-4 mt-8">
               <p className="text-slate text-sm">
-                Bloomberg'den veriler ve haberler.
+                Yapay zeka destekli haber özetleri.
               </p>
             </footer>
             
