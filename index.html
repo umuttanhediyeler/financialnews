@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gündem Finans</title>
+    <title>Gündem</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -22,23 +22,6 @@
         }
       }
     </script>
-    <style>
-      @keyframes fadeIn-up {
-        from {
-          opacity: 0;
-          transform: translateY(1rem);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .news-card-item {
-        animation: fadeIn-up 0.5s ease-out forwards;
-        animation-delay: calc(var(--delay-index) * 100ms);
-        opacity: 0;
-      }
-    </style>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script type="importmap">
     {
@@ -57,7 +40,7 @@
       // CDN Imports
       import React, { useState, useEffect } from 'react';
       import ReactDOM from 'react-dom/client';
-      import { GoogleGenAI, Type } from "@google/genai";
+      import { GoogleGenAI } from "@google/genai";
 
       // --- services/geminiService.ts ---
       const fetchTurkishFinancialNews = async (ai) => {
@@ -69,27 +52,18 @@
             Act as a financial news expert. Fetch 8 of the most recent and significant financial news articles from Turkey.
             Topics should include the stock market, foreign exchange, and commodities.
             The "title" and "summary" MUST be in Turkish.
+            Your response MUST be ONLY a raw JSON array, starting with '[' and ending with ']'. Do not add any other text or markdown formatting.
+            Each JSON object in the array must contain:
+            - "title": The article headline, in Turkish.
+            - "summary": A concise, one-sentence summary, in Turkish.
+            - "url": The direct URL to the source article.
           `;
-
-          const responseSchema = {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                url: { type: Type.STRING },
-              },
-              required: ["title", "summary", "url"],
-            },
-          };
 
           const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
             config: {
-              responseMimeType: "application/json",
-              responseSchema: responseSchema,
+              tools: [{googleSearch: {}}],
               temperature: 0.5,
             },
           });
@@ -100,14 +74,25 @@
             console.error("The AI model returned an empty response.");
             throw new Error("Yapay zeka modeli boş bir yanıt döndürdü. Lütfen daha sonra tekrar deneyin.");
           }
+
+          const startIndex = responseText.indexOf('[');
+          const endIndex = responseText.lastIndexOf(']');
+
+          if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+            console.error("Could not find a valid JSON array in the model response.", { responseText });
+            throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
+          }
+          
+          const jsonString = responseText.substring(startIndex, endIndex + 1);
           
           let articles;
           try {
-              articles = JSON.parse(responseText);
+              articles = JSON.parse(jsonString);
           } catch (parseError) {
-              console.error("JSON parsing error:", parseError, { responseText });
+              console.error("JSON parsing error:", parseError, { jsonString });
               throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
           }
+
 
           if (!Array.isArray(articles)) {
             console.error("Parsed data is not an array:", { articles });
@@ -136,52 +121,41 @@
         if (!ai) {
           throw new Error("GenAI istemcisi başlatılamadı.");
         }
+        try {
+          const prompt = `
+            As an expert financial analyst, provide a detailed summary of the article at this URL: ${url}.
+            The summary must be in Turkish.
+            Include key data, financial figures, and any market implications mentioned.
+            Structure the summary into multiple paragraphs for clarity.
+            Your response should contain ONLY the Turkish summary text, with no extra titles or introductions.
+          `;
+          
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+              tools: [{googleSearch: {}}],
+              temperature: 0.2,
+            },
+          });
 
-        const MAX_RETRIES = 2; // Try up to 2 times
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                // Simplified prompt to increase reliability and prevent server errors
-                const prompt = `Lütfen bu makaleyi Türkçe özetle: ${url}. Özet, yalnızca makalenin içeriğini yansıtmalı ve herhangi bir ek yorum veya başlık içermemelidir.`;
-                
-                const response = await ai.models.generateContent({
-                    model: "gemini-2.5-flash",
-                    contents: prompt,
-                    config: {
-                        tools: [{googleSearch: {}}],
-                        temperature: 0.2,
-                    },
-                });
+          const content = response.text;
+          const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+          
+          const sources = groundingChunks
+              .map(chunk => chunk.web)
+              .filter((web) => !!web?.uri);
 
-                const content = response.text?.trim();
-
-                if (!content || content.length < 20) {
-                    if (attempt === MAX_RETRIES) {
-                        throw new Error("Model, makale için yeterli içerik döndürmedi.");
-                    }
-                    await new Promise(res => setTimeout(res, 500));
-                    continue; 
-                }
-                
-                const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-                const sources = groundingChunks
-                    .map(chunk => chunk.web)
-                    .filter((web) => !!web?.uri);
-                
-                return { content, sources }; // Success! Exit the loop.
-
-            } catch (error) {
-                console.error(`Attempt ${attempt} failed for URL ${url}:`, error);
-                if (attempt === MAX_RETRIES) {
-                    // After all retries, throw the final, more user-friendly error.
-                    throw new Error("Makalenin tam içeriği alınamadı. Lütfen daha sonra tekrar deneyin.");
-                }
-                // Wait before the next retry
-                await new Promise(res => setTimeout(res, 750));
-            }
+          if (!content || content.trim().length < 20) {
+              throw new Error("Model, makale için yeterli içerik döndürmedi.");
+          }
+          
+          return { content, sources };
+        } catch(error) {
+          console.error(`Error fetching content for URL ${url}:`, error);
+          throw new Error("Makalenin tam içeriği alınamadı.");
         }
-        // This part should not be reachable if the loop is correct
-        throw new Error("Makalenin tam içeriği alınamadı.");
-      };
+      }
 
       // --- components/LoadingSpinner.tsx ---
       const LoadingSpinner = () => {
@@ -309,6 +283,9 @@
       };
       
       // --- App.tsx ---
+      // UYARI: API anahtarlarını doğrudan koda eklemek güvenli değildir ve önerilmez.
+      // Bu anahtar, web sitenizin kaynak kodunu görüntüleyen herkes tarafından görülebilir.
+      // Production uygulamaları için bir backend proxy veya ortam değişkenleri kullanın.
       const ai = new GoogleGenAI({ apiKey: "AIzaSyB460wHiXfCTjMRjmz7dw73hgSCJEekMGo" });
 
       const App = () => {
@@ -394,9 +371,7 @@
           return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 lg:gap-8">
               {articles.map((article, index) => (
-                <div key={index} className="news-card-item" style={{'--delay-index': index}}>
-                  <NewsCard article={article} onSelect={handleSelectArticle} />
-                </div>
+                <NewsCard key={index} article={article} onSelect={handleSelectArticle} />
               ))}
             </div>
           );
@@ -404,12 +379,12 @@
 
         return (
           <div className="min-h-screen bg-brand-blue font-sans text-lightest-slate relative overflow-x-hidden">
-            <main className="container mx-auto p-4 md:p-6 lg:p-8">
+            <main className="container mx-auto p-4 md:p-6 lg:p-8 pt-8 md:pt-12">
               {renderContent()}
             </main>
             <footer className="text-center py-4 mt-8">
               <p className="text-slate text-sm">
-                Yapay Zeka ile Güçlendirilmiştir
+                Bloomberg'den veriler ve haberler.
               </p>
             </footer>
             
