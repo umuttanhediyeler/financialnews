@@ -48,7 +48,18 @@
           throw new Error("GenAI istemcisi başlatılamadı.");
         }
         try {
-          const prompt = `Türkiye'den borsa, döviz ve emtiaları kapsayan en son ve en önemli 8 finans haberini al. Başlık ve özet Türkçe olmalı.`;
+          const prompt = `
+            Türkiye'den borsa, döviz ve emtiaları kapsayan en son ve en önemli 8 finans haberini al.
+            Yanıt, aşağıdaki yapıya sahip bir JSON dizisi olmalıdır:
+            [
+              {
+                "title": "Makale başlığı, Türkçe.",
+                "summary": "Tek cümlelik kısa özet, Türkçe.",
+                "url": "Kaynak makalenin direkt URL'si."
+              }
+            ]
+            Başka hiçbir metin veya açıklama eklemeden yalnızca JSON dizisini döndürün.
+          `;
           
           const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
@@ -56,19 +67,6 @@
             config: {
               tools: [{googleSearch: {}}],
               temperature: 0.5,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING, description: "Makale başlığı, Türkçe." },
-                    summary: { type: Type.STRING, description: "Tek cümlelik kısa özet, Türkçe." },
-                    url: { type: Type.STRING, description: "Kaynak makalenin direkt URL'si." }
-                  },
-                  required: ["title", "summary", "url"]
-                }
-              },
               thinkingConfig: { thinkingBudget: 0 }
             },
           });
@@ -82,7 +80,9 @@
           
           let articles;
           try {
-              articles = JSON.parse(responseText);
+              // Clean potential markdown formatting from the response
+              const cleanedText = responseText.replace(/^```json\s*|```$/g, '');
+              articles = JSON.parse(cleanedText);
           } catch (parseError) {
               console.error("JSON parsing error:", parseError, { responseText });
               throw new Error("Haber verileri yapay zeka modelinden ayrıştırılamadı. Format geçersizdi.");
@@ -275,7 +275,7 @@
       };
       
       // --- App.tsx ---
-      const ai = new GoogleGenAI({ apiKey: AIzaSyB460wHiXfCTjMRjmz7dw73hgSCJEekMGo });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       const App = () => {
         const [articles, setArticles] = useState([]);
