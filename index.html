@@ -281,89 +281,39 @@
           </div>
         );
       };
-
-      // --- components/ApiKeyModal.tsx ---
-      const ApiKeyModal = ({ onSetApiKey, error }) => {
-        const [inputKey, setInputKey] = useState("");
-
-        const handleSubmit = (e) => {
-          e.preventDefault();
-          if (inputKey.trim()) {
-            onSetApiKey(inputKey.trim());
-          }
-        };
-
-        return (
-          <div className="fixed inset-0 z-50 bg-brand-blue/90 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-dark-blue w-full max-w-md p-8 rounded-lg shadow-2xl text-center">
-              <h2 className="text-2xl font-bold text-lightest-slate mb-4">API Anahtarı Gerekli</h2>
-              <p className="text-slate mb-6">
-                Devam etmek için lütfen Google Gemini API anahtarınızı girin. Anahtarınız yalnızca bu oturum için tarayıcınızda saklanacaktır.
-              </p>
-              <form onSubmit={handleSubmit}>
-                <input
-                  type="password"
-                  value={inputKey}
-                  onChange={(e) => setInputKey(e.target.value)}
-                  placeholder="API Anahtarınızı buraya yapıştırın"
-                  className="w-full bg-brand-blue border border-medium-blue rounded-md px-4 py-2 text-lightest-slate focus:outline-none focus:ring-2 focus:ring-brand-orange mb-4"
-                  aria-label="Google Gemini API Key"
-                />
-                 {error && (
-                    <p className="text-red-400 text-sm mb-4" role="alert">{error}</p>
-                 )}
-                <button
-                  type="submit"
-                  className="w-full bg-brand-orange text-white font-bold py-2 px-4 rounded-md hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-brand-orange focus:ring-offset-2 focus:ring-offset-dark-blue"
-                >
-                  Devam
-                </button>
-              </form>
-            </div>
-          </div>
-        );
-      };
       
       // --- App.tsx ---
-      const App = () => {
-        const [aiClient, setAiClient] = useState(null);
-        const [apiKeyError, setApiKeyError] = useState(null);
+      // WARNING: Storing your API key in client-side code is insecure and exposes it to everyone.
+      // Anyone can view your key and use it, which may result in unexpected charges.
+      // For production applications, it is strongly recommended to use a backend server to handle API requests.
+      // Replace "YOUR_API_KEY_HERE" with your actual Google Gemini API key.
+      const API_KEY = "YOUR_API_KEY_HERE";
+      
+      let ai;
+      let initializationError = null;
 
+      if (API_KEY === "YOUR_API_KEY_HERE") {
+          initializationError = "API Anahtarı yapılandırılmamış. Lütfen index.html dosyasındaki API_KEY değişkenini güncelleyin.";
+      } else {
+        try {
+          ai = new GoogleGenAI({ apiKey: API_KEY });
+        } catch (e) {
+          console.error("GoogleGenAI başlatılırken hata oluştu:", e);
+          initializationError = "Google AI istemcisi başlatılamadı. API anahtarınızın biçimini kontrol edin.";
+        }
+      }
+
+      const App = () => {
         const [articles, setArticles] = useState([]);
         const [isLoading, setIsLoading] = useState(true);
-        const [error, setError] = useState(null);
+        const [error, setError] = useState(initializationError);
 
         const [selectedArticle, setSelectedArticle] = useState(null);
         const [isDetailLoading, setIsDetailLoading] = useState(false);
         const [detailError, setDetailError] = useState(null);
 
         useEffect(() => {
-            const storedKey = sessionStorage.getItem('gemini-api-key');
-            if (storedKey) {
-                try {
-                    setAiClient(new GoogleGenAI({ apiKey: storedKey }));
-                } catch(e) {
-                    console.error(e);
-                    setApiKeyError("API anahtarı başlatılamadı.");
-                    sessionStorage.removeItem('gemini-api-key');
-                }
-            }
-        }, []);
-
-        const handleSetApiKey = (key) => {
-            try {
-                const client = new GoogleGenAI({ apiKey: key });
-                setAiClient(client);
-                sessionStorage.setItem('gemini-api-key', key);
-                setApiKeyError(null);
-            } catch(e) {
-                console.error(e);
-                setApiKeyError("Geçersiz API Anahtarı. Lütfen tekrar deneyin.");
-            }
-        };
-
-        useEffect(() => {
-          if (!aiClient) {
+          if (error) { // If there was an initialization error, stop loading and show the error.
             setIsLoading(false);
             return;
           };
@@ -372,17 +322,11 @@
             try {
               setIsLoading(true);
               setError(null);
-              const newsArticles = await fetchTurkishFinancialNews(aiClient);
+              const newsArticles = await fetchTurkishFinancialNews(ai);
               setArticles(newsArticles);
             } catch (err) {
               if (err instanceof Error) {
-                if(err.message.includes("Geçersiz API Anahtarı")) {
-                    setApiKeyError(err.message);
-                    setAiClient(null);
-                    sessionStorage.removeItem('gemini-api-key');
-                } else {
-                    setError(err.message);
-                }
+                setError(err.message);
               } else {
                 setError('Bilinmeyen bir hata oluştu.');
               }
@@ -392,7 +336,7 @@
           };
 
           getNews();
-        }, [aiClient]);
+        }, []); // Run only once on mount
 
         useEffect(() => {
           if (selectedArticle) {
@@ -408,12 +352,12 @@
 
         const handleSelectArticle = async (article) => {
           setSelectedArticle(article);
-          if (article.content || !aiClient) return;
+          if (article.content || !ai) return;
 
           setIsDetailLoading(true);
           setDetailError(null);
           try {
-            const { content, sources } = await fetchArticleContent(aiClient, article.url);
+            const { content, sources } = await fetchArticleContent(ai, article.url);
             const updatedArticle = { ...article, content, sources };
             setSelectedArticle(updatedArticle);
             setArticles(prevArticles => 
@@ -452,10 +396,6 @@
             </div>
           );
         };
-
-        if (!aiClient) {
-            return <ApiKeyModal onSetApiKey={handleSetApiKey} error={apiKeyError} />;
-        }
 
         return (
           <div className="min-h-screen bg-brand-blue font-sans text-lightest-slate relative overflow-x-hidden">
