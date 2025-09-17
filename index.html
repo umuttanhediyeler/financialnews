@@ -283,24 +283,20 @@
       };
       
       // --- App.tsx ---
-      // WARNING: Storing your API key in client-side code is insecure and exposes it to everyone.
-      // Anyone can view your key and use it, which may result in unexpected charges.
-      // For production applications, it is strongly recommended to use a backend server to handle API requests.
-      // Replace "YOUR_API_KEY_HERE" with your actual Google Gemini API key.
-      const API_KEY = "YOUR_API_KEY_HERE";
-      
       let ai;
       let initializationError = null;
 
-      if (API_KEY === "YOUR_API_KEY_HERE") {
-          initializationError = "API Anahtarı yapılandırılmamış. Lütfen index.html dosyasındaki API_KEY değişkenini güncelleyin.";
-      } else {
-        try {
-          ai = new GoogleGenAI({ apiKey: API_KEY });
-        } catch (e) {
-          console.error("GoogleGenAI başlatılırken hata oluştu:", e);
-          initializationError = "Google AI istemcisi başlatılamadı. API anahtarınızın biçimini kontrol edin.";
+      try {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) {
+          throw new Error("API Anahtarı ortam değişkenlerinde yapılandırılmamış.");
         }
+        ai = new GoogleGenAI({ apiKey: apiKey });
+      } catch (e) {
+        console.error("GoogleGenAI başlatılırken hata oluştu:", e);
+        // This catch block handles both the error from the 'new Error' above
+        // and potential ReferenceError if 'process' is not defined in the browser.
+        initializationError = "API Anahtarı yapılandırması bulunamadı. Lütfen dağıtım ortamınızı kontrol edin.";
       }
 
       const App = () => {
