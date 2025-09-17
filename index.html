@@ -44,66 +44,101 @@
 
       // --- services/geminiService.ts ---
       const getDisplayError = (error) => {
-          console.error("Full API Error:", error);
-          if (error instanceof Error) {
-            let message = error.message;
-            
-            // Attempt to parse JSON from the error message, as the API might return it
-            try {
-              const errorJson = JSON.parse(message);
-              if (errorJson.error && errorJson.error.message) {
-                message = errorJson.error.message;
-              }
-            } catch (e) {
-              // Not a JSON error, proceed with string matching on the original message
-            }
+        console.error("Full API Error:", error);
+        if (!(error instanceof Error)) {
+            return "Bilinmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.";
+        }
 
-            const lowerCaseMessage = message.toLowerCase();
+        let message = error.message;
+        
+        // Attempt to parse JSON from the error message for structured error details
+        try {
+            const errorJson = JSON.parse(message);
+            if (errorJson.error) {
+                const { code, message: innerMessage } = errorJson.error;
+                
+                // Handle specific server-side errors first
+                if (code >= 500 && code < 600) {
+                    return `Yapay zeka sunucusunda geçici bir sorun oluştu (Hata Kodu: ${code}). Uygulama otomatik olarak yeniden deniyor. Sorun devam ederse lütfen biraz bekleyin.`;
+                }
+                
+                // Use the more specific message from the API response
+                message = innerMessage || message;
+            }
+        } catch (e) {
+            // Not a JSON error, proceed with string matching on the original message
+        }
 
-            if (lowerCaseMessage.includes('api key not valid')) {
-                return "Geçersiz API Anahtarı. Lütfen anahtarınızı kontrol edip tekrar deneyin.";
-            }
-            if (lowerCaseMessage.includes('http referrer')) {
-                return "API Anahtarı bu web sitesi için yetkilendirilmemiş. Lütfen Google Cloud Console'da web sitenizin adresini (URL) yetkili alanlara eklediğinizden emin olun.";
-            }
-            if (lowerCaseMessage.includes('quota')) {
-                return "API kullanım kotası aşıldı. Lütfen daha sonra tekrar deneyin veya Google Cloud kotanızı kontrol edin.";
-            }
-            if (lowerCaseMessage.includes('overloaded') || lowerCaseMessage.includes('503')) {
-                return "Yapay zeka modeli şu anda aşırı yoğun. Lütfen birkaç dakika sonra tekrar deneyin.";
-            }
-            return message; // Return the specific error message
-          }
-          return "Bilinmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.";
+        const lowerCaseMessage = message.toLowerCase();
+
+        if (lowerCaseMessage.includes('api key not valid')) {
+            return "Geçersiz API Anahtarı. Lütfen anahtarınızı kontrol edip tekrar deneyin.";
+        }
+        if (lowerCaseMessage.includes('http referrer')) {
+            return "API Anahtarı bu web sitesi için yetkilendirilmemiş. Lütfen Google Cloud Console'da web sitenizin adresini (URL) yetkili alanlara eklediğinizden emin olun.";
+        }
+        if (lowerCaseMessage.includes('quota')) {
+            return "API kullanım kotası aşıldı. Lütfen daha sonra tekrar deneyin veya Google Cloud kotanızı kontrol edin.";
+        }
+        if (lowerCaseMessage.includes('overloaded') || lowerCaseMessage.includes('503')) {
+            return "Yapay zeka modeli şu anda aşırı yoğun. Lütfen birkaç dakika sonra tekrar deneyin.";
+        }
+        if (lowerCaseMessage.includes('rpc failed') || lowerCaseMessage.includes('xhr error') || lowerCaseMessage.includes('load failed')) {
+            return "Ağ bağlantısı hatası oluştu. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.";
+        }
+        
+        // Return the specific message if no match is found, or a generic one
+        return message || "Bilinmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.";
       }
 
       const generateContentWithRetry = async (ai, params, maxRetries = 3, initialDelay = 2000) => {
         let attempts = 0;
         let delay = initialDelay;
         while (attempts < maxRetries) {
-          try {
-            const response = await ai.models.generateContent(params);
-            if (!response.text || response.text.trim() === '') {
-              // This is a valid response, but empty. We don't want to retry this.
-              throw new Error("Model returned an empty response.");
-            }
-            return response;
-          } catch (error) {
-            attempts++;
-            const isRetryable = error instanceof Error && (error.message.includes('503') || error.message.toLowerCase().includes('overloaded'));
+            try {
+                const response = await ai.models.generateContent(params);
+                if (!response.text || response.text.trim() === '') {
+                    throw new Error("Model, geçerli bir yanıt döndürmedi (boş içerik).");
+                }
+                return response;
+            } catch (error) {
+                attempts++;
+                let isRetryable = false;
+                
+                if (error instanceof Error) {
+                    const lowerCaseMessage = error.message.toLowerCase();
+                    isRetryable = lowerCaseMessage.includes('overloaded') || lowerCaseMessage.includes('503');
 
-            if (isRetryable && attempts < maxRetries) {
-              console.warn(`Attempt ${attempts} failed due to overloaded model. Retrying in ${delay / 1000}s...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              delay *= 2; // Exponential backoff
-            } else {
-              throw error; // Re-throw the last error if not retryable or max retries reached
+                    // Try parsing for 5xx server errors
+                    try {
+                        const errorJson = JSON.parse(error.message);
+                        if (errorJson.error && errorJson.error.code) {
+                            const errorCode = Number(errorJson.error.code);
+                            if (errorCode >= 500 && errorCode < 600) {
+                                isRetryable = true;
+                            }
+                        }
+                    } catch (e) {
+                        // Not a JSON error, but might still be a network error
+                        if (lowerCaseMessage.includes('rpc failed') || lowerCaseMessage.includes('xhr error') || lowerCaseMessage.includes('load failed')) {
+                            isRetryable = true;
+                        }
+                    }
+                }
+
+                if (isRetryable && attempts < maxRetries) {
+                    console.warn(`Attempt ${attempts} failed. Retrying in ${delay / 1000}s...`, error);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff
+                } else {
+                    console.error(`Request failed after ${attempts} attempts.`, error);
+                    throw error; // Re-throw the last error if not retryable or max retries reached
+                }
             }
-          }
         }
         throw new Error("Yapay zeka modeli birden fazla denemeden sonra yanıt vermedi.");
       };
-
+      
       const fetchTurkishFinancialNews = async (ai) => {
         if (!ai) {
           throw new Error("GenAI istemcisi başlatılamadı.");
